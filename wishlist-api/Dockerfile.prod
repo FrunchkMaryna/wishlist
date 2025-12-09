@@ -1,0 +1,56 @@
+# --- Stage 1: Builder ---
+    FROM python:3.11-slim as builder
+
+    WORKDIR /app
+    
+    # Запобігаємо створенню .pyc файлів та буферизації виводу
+    ENV PYTHONDONTWRITEBYTECODE=1
+    ENV PYTHONUNBUFFERED=1
+    
+    # Встановлюємо системні залежності для збірки (gcc, libpq для postgres)
+    RUN apt-get update && \
+        apt-get install -y --no-install-recommends gcc libpq-dev && \
+        rm -rf /var/lib/apt/lists/*
+    
+    COPY requirements.txt .
+    # Створюємо wheels (скомпільовані пакети) в папку /wheels
+    RUN pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.txt
+    
+    
+    # --- Stage 2: Final (Production Image) ---
+    FROM python:3.11-slim
+    
+    WORKDIR /app
+    
+    # Створюємо користувача 'appuser' (Non-root user requirement)
+    RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+    
+    # Встановлюємо тільки runtime-бібліотеки (libpq), без gcc
+    RUN apt-get update && \
+        apt-get install -y --no-install-recommends libpq-dev curl && \
+        rm -rf /var/lib/apt/lists/*
+    
+    # Копіюємо скомпільовані пакети з етапу builder
+    COPY --from=builder /app/wheels /wheels
+    COPY --from=builder /app/requirements.txt .
+    
+    # Встановлюємо пакети
+    RUN pip install --no-cache /wheels/*
+    
+    # Копіюємо код додатку
+    COPY . .
+    
+    # Надаємо права на папку нашому користувачу
+    RUN chown -R appuser:appgroup /app
+    
+    # Перемикаємося на non-root користувача
+    USER appuser
+    
+    # Healthcheck (перевірка працездатності)
+    HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+      CMD curl -f http://localhost:8000/health || exit 1
+    
+    EXPOSE 8000
+    
+    # Запуск через gunicorn (Production server) або uvicorn
+    CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

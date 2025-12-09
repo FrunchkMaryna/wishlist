@@ -1,0 +1,124 @@
+version: "3.8"
+
+services:
+  # --- 1. Database (PostgreSQL) ---
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: wishlist-prod-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    networks:
+      - backend-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  # --- 2. Cache (Redis) ---
+  redis-cache:
+    image: redis:7-alpine
+    container_name: wishlist-prod-redis
+    restart: always
+    command: redis-server --maxmemory 200mb --maxmemory-policy allkeys-lru --save 60 1
+    volumes:
+      - redisdata_prod:/data
+    networks:
+      - backend-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  # --- 3. Backend API (FastAPI) ---
+  backend-api:
+    build:
+      context: ./wishlist-api
+      dockerfile: Dockerfile.prod
+    container_name: wishlist-prod-api
+    restart: always
+    environment:
+      # - POSTGRES_USER=${POSTGRES_USER}
+      # - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      # - POSTGRES_DB=${POSTGRES_DB}
+      - DB_HOST=postgres-db
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB}
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
+
+      - REDIS_HOST=redis-cache
+      - REDIS_PORT=6379
+      - ENVIRONMENT=production
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+    networks:
+      - backend-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  # --- 4. Frontend (Vue.js + Nginx) ---
+  frontend:
+    build:
+      context: ./wishlist-ui
+      dockerfile: Dockerfile
+    container_name: wishlist-prod-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend-api
+    networks:
+      - frontend-net
+      - backend-net
+
+  # --- 5. Backup Service ---
+  db-backup:
+    image: postgres:15-alpine
+    container_name: wishlist-backup
+    volumes:
+      - ./backups:/backups
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGHOST: postgres-db
+      PGUSER: ${POSTGRES_USER}
+      PGDATABASE: ${POSTGRES_DB}
+    networks:
+      - backend-net
+    command: >
+      sh -c "sleep 20 && 
+             pg_dump -h postgres-db -U ${POSTGRES_USER} -d ${POSTGRES_DB} > /backups/initial_dump.sql &&
+             echo 'Initial DB dump created' &&
+             tail -f /dev/null"
+
+volumes:
+  pgdata_prod:
+  redisdata_prod:
+
+networks:
+  frontend-net:
+    driver: bridge
+  backend-net:
+    driver: bridge

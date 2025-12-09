@@ -100,17 +100,6 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-
-@app.post("/logout")
-async def logout(current_user: User = Depends(get_current_user)):
-    # У JWT/OAuth2 нам не потрібно нічого робити на сервері,
-    # оскільки токен видаляється на стороні клієнта.
-    # Ми просто перевіряємо, що токен дійсний.
-    return {"message": "Logged out successfully (token deleted by client)"}
-
-
-
-
 @app.get("/users/me", response_model=UserResponse)
 async def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user

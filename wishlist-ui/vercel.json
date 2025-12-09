@@ -2,6 +2,7 @@
 {
   "rewrites": [
     {
+      
       "source": "/api/(.*)",
       "destination": "https://wishlist-2-nj4d.onrender.com/api/$1"
     }

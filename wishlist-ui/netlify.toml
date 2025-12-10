@@ -2,7 +2,7 @@
 # Налаштування для збірки
 [build]
   command = "npm run build"
-  publish = "dist" # <--- ЦЕ КРИТИЧНО!
+  publish = "dist" 
 
 # Налаштування Production-конфігурації
 [[redirects]]
